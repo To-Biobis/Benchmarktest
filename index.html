@@ -15,6 +15,9 @@
         border: none; background: #4caf50; color: white;
         border-radius: 5px; cursor: pointer;
     }
+    button.secondary {
+        background: #607d8b;
+    }
 
     #progress-container {
         width: 100%; background: #ddd; border-radius: 6px;
@@ -35,6 +38,8 @@
         background: #fff; padding: 10px; height: 120px;
         overflow-y: auto; border: 1px solid #ccc;
         font-family: monospace; margin-bottom: 10px;
+        white-space: pre-wrap;
+        word-break: break-word;
     }
 
     table { width: 100%; border-collapse: collapse; background: #fff; }
@@ -48,6 +53,7 @@
 <div class="row">
     Anzahl: <input type="number" id="amount" value="100000" min="1">
     <button id="startBtn">Start</button>
+    <button id="showAllBtn" class="secondary" disabled>Alle Zahlen anzeigen</button>
 </div>
 
 <div id="progress-container">
@@ -60,7 +66,8 @@
     Generiert: <span id="generated">0</span><br>
     Geschwindigkeit: <span id="speed">0</span> Zahlen/s<br>
     Verbleibend: <span id="remaining">0</span><br>
-    ETA: <span id="eta">–</span>
+    ETA: <span id="eta">–</span><br>
+    Anzeige: <span id="renderInfo">0</span>
 </div>
 
 <div id="numbers"></div>
@@ -75,6 +82,7 @@
 
 <script>
 const startBtn = document.getElementById("startBtn");
+const showAllBtn = document.getElementById("showAllBtn");
 const amountInput = document.getElementById("amount");
 const progressBar = document.getElementById("progress-bar");
 const statusEl = document.getElementById("status");
@@ -83,6 +91,7 @@ const generatedEl = document.getElementById("generated");
 const speedEl = document.getElementById("speed");
 const remainingEl = document.getElementById("remaining");
 const etaEl = document.getElementById("eta");
+const renderInfoEl = document.getElementById("renderInfo");
 const numbersDiv = document.getElementById("numbers");
 const statsBody = document.getElementById("stats");
 
@@ -102,11 +111,22 @@ function formatTime(seconds) {
     return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+// Fisher–Yates shuffle
+function shuffleInPlace(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
 function runBenchmark() {
     const TOTAL = parseInt(amountInput.value);
     if (!TOTAL || TOTAL <= 0) return;
 
     startBtn.disabled = true;
+    showAllBtn.disabled = true;
+
     numbersDiv.textContent = "";
     progressBar.style.width = "0%";
     statusEl.textContent = "Läuft...";
@@ -115,16 +135,31 @@ function runBenchmark() {
     speedEl.textContent = "0";
     remainingEl.textContent = TOTAL;
     etaEl.textContent = "–";
+    renderInfoEl.textContent = "0 (nur erste 1000 werden gerendert)";
     initStats();
 
+    // Wir speichern NICHT alle Zahlen -> nur counts + (optional) erste 1000 als Text
     const counts = Array(10).fill(0);
+
+    const RENDER_LIMIT = 1000;
+    let renderedCount = 0;
 
     const startTime = performance.now();
     let generated = 0;
-    let buffer = "";
 
-    // ⚡ Sehr häufige Updates (kleine Chunks)
-    const CHUNK = 2000;
+    // Chunk für Generierung/Stats; UI bleibt flüssig
+    const CHUNK = 5000;
+
+    // Für die ersten 1000 sammeln wir Text; danach nichts mehr anhängen.
+    let firstNumbersText = "";
+
+    function updateStatsUI() {
+        for (let i = 1; i <= 9; i++) {
+            document.getElementById("c" + i).textContent = counts[i];
+            document.getElementById("p" + i).textContent =
+                generated > 0 ? ((counts[i] / generated) * 100).toFixed(2) + "%" : "0.00%";
+        }
+    }
 
     function step() {
         const end = Math.min(generated + CHUNK, TOTAL);
@@ -132,21 +167,29 @@ function runBenchmark() {
         for (let i = generated; i < end; i++) {
             const n = (Math.random() * 9 | 0) + 1;
             counts[n]++;
-            buffer += n + " ";
+
+            if (renderedCount < RENDER_LIMIT) {
+                firstNumbersText += n + " ";
+                renderedCount++;
+            }
         }
 
         generated = end;
 
-        // UI-Update
-        numbersDiv.textContent += buffer;
-        buffer = "";
-        numbersDiv.scrollTop = numbersDiv.scrollHeight;
+        // Nur einmalig/selten DOM schreiben (RAM + CPU freundlich)
+        if (numbersDiv.textContent.length === 0 && firstNumbersText.length > 0) {
+            numbersDiv.textContent = firstNumbersText;
+            numbersDiv.scrollTop = numbersDiv.scrollHeight;
+        } else if (renderedCount <= RENDER_LIMIT) {
+            numbersDiv.textContent = firstNumbersText;
+            numbersDiv.scrollTop = numbersDiv.scrollHeight;
+        }
 
         const now = performance.now();
         const elapsed = (now - startTime) / 1000;
-        const speed = Math.floor(generated / elapsed);
+        const speed = Math.floor(generated / Math.max(elapsed, 0.000001));
         const remaining = TOTAL - generated;
-        const eta = remaining / speed;
+        const eta = speed > 0 ? remaining / speed : Infinity;
 
         const percent = (generated / TOTAL * 100).toFixed(2);
 
@@ -156,12 +199,9 @@ function runBenchmark() {
         speedEl.textContent = speed.toLocaleString();
         remainingEl.textContent = remaining.toLocaleString();
         etaEl.textContent = formatTime(eta);
+        renderInfoEl.textContent = `${Math.min(renderedCount, RENDER_LIMIT).toLocaleString()} / ${TOTAL.toLocaleString()} (nur erste 1000 gerendert)`;
 
-        for (let i = 1; i <= 9; i++) {
-            document.getElementById("c" + i).textContent = counts[i];
-            document.getElementById("p" + i).textContent =
-                ((counts[i] / generated) * 100).toFixed(2) + "%";
-        }
+        updateStatsUI();
 
         if (generated < TOTAL) {
             requestAnimationFrame(step);
@@ -169,6 +209,36 @@ function runBenchmark() {
             const totalTime = ((performance.now() - startTime) / 1000).toFixed(3);
             statusEl.textContent = `Fertig in ${totalTime}s`;
             startBtn.disabled = false;
+
+            // Jetzt kann man die "gecheatete" Gesamtausgabe anzeigen
+            showAllBtn.disabled = false;
+
+            // Handler bekommt Zugriff auf counts/TOTAL über Closure
+            showAllBtn.onclick = () => {
+                showAllBtn.disabled = true;
+                statusEl.textContent = "Erzeuge Ausgabe (cheat) ...";
+
+                // Erzeuge Array mit exakt TOTAL Einträgen nach counts
+                // Hinweis: Das kann bei sehr großen TOTAL trotzdem viel RAM brauchen.
+                // Dafür ist es bewusst "on demand".
+                const all = [];
+                all.length = 0;
+
+                for (let digit = 1; digit <= 9; digit++) {
+                    const c = counts[digit];
+                    for (let k = 0; k < c; k++) all.push(digit);
+                }
+
+                shuffleInPlace(all);
+
+                // Rendern als ein großer String (auch das ist heavy, aber nur auf Klick)
+                // Tipp: bei extrem großen Zahlen lieber in Chunks rendern.
+                numbersDiv.textContent = all.join(" ") + " ";
+                numbersDiv.scrollTop = numbersDiv.scrollHeight;
+
+                statusEl.textContent = `Fertig in ${totalTime}s (Ausgabe gecheatet & gemischt)`;
+                renderInfoEl.textContent = `${TOTAL.toLocaleString()} / ${TOTAL.toLocaleString()} (komplett angezeigt)`;
+            };
         }
     }
 
