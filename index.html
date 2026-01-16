@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Zufallszahlen Benchmark</title>
+<style>
+    body { font-family: Arial, sans-serif; margin: 25px; background: #f4f4f4; }
+    h1 { margin-bottom: 10px; }
+
+    .row { margin-bottom: 8px; }
+    input, button {
+        padding: 8px; font-size: 1em; margin-right: 5px;
+    }
+    button {
+        border: none; background: #4caf50; color: white;
+        border-radius: 5px; cursor: pointer;
+    }
+
+    #progress-container {
+        width: 100%; background: #ddd; border-radius: 6px;
+        overflow: hidden; margin: 10px 0;
+    }
+    #progress-bar {
+        width: 0%; height: 22px;
+        background: linear-gradient(90deg, #4caf50, #8bc34a);
+    }
+
+    #statsBox {
+        background: #fff; padding: 10px; border: 1px solid #ccc;
+        margin-bottom: 10px;
+        font-family: monospace;
+    }
+
+    #numbers {
+        background: #fff; padding: 10px; height: 120px;
+        overflow-y: auto; border: 1px solid #ccc;
+        font-family: monospace; margin-bottom: 10px;
+    }
+
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th, td { padding: 6px; border: 1px solid #ccc; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>Zufallszahlen Benchmark (1–9)</h1>
+
+<div class="row">
+    Anzahl: <input type="number" id="amount" value="100000" min="1">
+    <button id="startBtn">Start</button>
+</div>
+
+<div id="progress-container">
+    <div id="progress-bar"></div>
+</div>
+
+<div id="statsBox">
+    Status: <span id="status">Bereit</span><br>
+    Fortschritt: <span id="progressText">0%</span><br>
+    Generiert: <span id="generated">0</span><br>
+    Geschwindigkeit: <span id="speed">0</span> Zahlen/s<br>
+    Verbleibend: <span id="remaining">0</span><br>
+    ETA: <span id="eta">–</span>
+</div>
+
+<div id="numbers"></div>
+
+<h2>Statistik</h2>
+<table>
+<thead>
+<tr><th>Zahl</th><th>Anzahl</th><th>Prozent</th></tr>
+</thead>
+<tbody id="stats"></tbody>
+</table>
+
+<script>
+const startBtn = document.getElementById("startBtn");
+const amountInput = document.getElementById("amount");
+const progressBar = document.getElementById("progress-bar");
+const statusEl = document.getElementById("status");
+const progressText = document.getElementById("progressText");
+const generatedEl = document.getElementById("generated");
+const speedEl = document.getElementById("speed");
+const remainingEl = document.getElementById("remaining");
+const etaEl = document.getElementById("eta");
+const numbersDiv = document.getElementById("numbers");
+const statsBody = document.getElementById("stats");
+
+function initStats() {
+    statsBody.innerHTML = "";
+    for (let i = 1; i <= 9; i++) {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td>${i}</td><td id="c${i}">0</td><td id="p${i}">0.00%</td>`;
+        statsBody.appendChild(row);
+    }
+}
+
+function formatTime(seconds) {
+    if (!isFinite(seconds) || seconds <= 0) return "–";
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function runBenchmark() {
+    const TOTAL = parseInt(amountInput.value);
+    if (!TOTAL || TOTAL <= 0) return;
+
+    startBtn.disabled = true;
+    numbersDiv.textContent = "";
+    progressBar.style.width = "0%";
+    statusEl.textContent = "Läuft...";
+    progressText.textContent = "0%";
+    generatedEl.textContent = "0";
+    speedEl.textContent = "0";
+    remainingEl.textContent = TOTAL;
+    etaEl.textContent = "–";
+    initStats();
+
+    const counts = Array(10).fill(0);
+
+    const startTime = performance.now();
+    let generated = 0;
+    let buffer = "";
+
+    // ⚡ Sehr häufige Updates (kleine Chunks)
+    const CHUNK = 2000;
+
+    function step() {
+        const end = Math.min(generated + CHUNK, TOTAL);
+
+        for (let i = generated; i < end; i++) {
+            const n = (Math.random() * 9 | 0) + 1;
+            counts[n]++;
+            buffer += n + " ";
+        }
+
+        generated = end;
+
+        // UI-Update
+        numbersDiv.textContent += buffer;
+        buffer = "";
+        numbersDiv.scrollTop = numbersDiv.scrollHeight;
+
+        const now = performance.now();
+        const elapsed = (now - startTime) / 1000;
+        const speed = Math.floor(generated / elapsed);
+        const remaining = TOTAL - generated;
+        const eta = remaining / speed;
+
+        const percent = (generated / TOTAL * 100).toFixed(2);
+
+        progressBar.style.width = percent + "%";
+        progressText.textContent = percent + "%";
+        generatedEl.textContent = generated.toLocaleString();
+        speedEl.textContent = speed.toLocaleString();
+        remainingEl.textContent = remaining.toLocaleString();
+        etaEl.textContent = formatTime(eta);
+
+        for (let i = 1; i <= 9; i++) {
+            document.getElementById("c" + i).textContent = counts[i];
+            document.getElementById("p" + i).textContent =
+                ((counts[i] / generated) * 100).toFixed(2) + "%";
+        }
+
+        if (generated < TOTAL) {
+            requestAnimationFrame(step);
+        } else {
+            const totalTime = ((performance.now() - startTime) / 1000).toFixed(3);
+            statusEl.textContent = `Fertig in ${totalTime}s`;
+            startBtn.disabled = false;
+        }
+    }
+
+    requestAnimationFrame(step);
+}
+
+startBtn.addEventListener("click", runBenchmark);
+</script>
+
+</body>
+</html>
